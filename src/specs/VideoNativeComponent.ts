@@ -344,6 +344,7 @@ export interface VideoNativeProps extends ViewProps {
   repeat?: boolean;
   automaticallyWaitsToMinimizeStalling?: boolean;
   shutterColor?: Int32;
+  textTrackDelay?: Int32; // millis
   audioOutput?: WithDefault<string, 'speaker'>;
   selectedTextTrack?: SelectedTextTrack;
   selectedAudioTrack?: SelectedAudioTrack;

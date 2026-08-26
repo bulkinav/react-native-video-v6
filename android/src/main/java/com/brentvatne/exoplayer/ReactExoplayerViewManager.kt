@@ -42,6 +42,7 @@ class ReactExoplayerViewManager(private val config: ReactExoplayerConfig) : View
         private const val PROP_REPORT_BANDWIDTH = "reportBandwidth"
         private const val PROP_RATE = "rate"
         private const val PROP_MAXIMUM_BIT_RATE = "maxBitRate"
+        private const val PROP_TEXT_TRACK_DELAY = "textTrackDelay"
         private const val PROP_PLAY_IN_BACKGROUND = "playInBackground"
         private const val PROP_DISABLE_FOCUS = "disableFocus"
         private const val PROP_BUFFERING_STRATEGY = "bufferingStrategy"
@@ -188,6 +189,11 @@ class ReactExoplayerViewManager(private val config: ReactExoplayerConfig) : View
     @ReactProp(name = PROP_MAXIMUM_BIT_RATE)
     fun setMaxBitRate(videoView: ReactExoplayerView, maxBitRate: Float) {
         videoView.setMaxBitRateModifier(maxBitRate.toInt())
+    }
+
+    @ReactProp(name = PROP_TEXT_TRACK_DELAY)
+    fun setTextTrackDelay(videoView: ReactExoplayerView, textTrackDelay: Int) {
+        videoView.setTextTrackDelayModifier(textTrackDelay)
     }
 
     @ReactProp(name = PROP_PLAY_IN_BACKGROUND, defaultBoolean = false)
