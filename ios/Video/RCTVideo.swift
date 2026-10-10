@@ -12,6 +12,8 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     var _player: AVPlayer?
     private var _playerItem: AVPlayerItem?
     private var _source: VideoSource?
+    /** Поколение source отменяет асинхронное завершение предыдущего HLS. */
+    private var _sourceGeneration = 0
     private var _playerLayer: AVPlayerLayer?
     private var _chapters: [Chapter]?
 
@@ -633,6 +635,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
     @objc
     func setSrc(_ source: NSDictionary!) {
+        _sourceGeneration += 1
         if self.isSetSourceOngoing || self.nextSource != nil {
             DebugLog("setSrc buffer request")
             self._player?.replaceCurrentItem(with: nil)
@@ -1560,7 +1563,9 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     func handleReadyToPlay() {
         guard let _playerItem else { return }
         guard let source = _source else { return }
+        let sourceGeneration = _sourceGeneration
         Task {
+            guard self._sourceGeneration == sourceGeneration, self._playerItem === _playerItem else { return }
             if self._pendingSeek {
                 self.setSeek(NSNumber(value: self._pendingSeekTime), NSNumber(value: 100))
                 self._pendingSeek = false
@@ -1601,7 +1606,9 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
                 let audioTracks = await RCTVideoUtils.getAudioTrackInfo(self._player)
                 let textTracks = await RCTVideoUtils.getTextTrackInfo(self._player)
+                guard self._sourceGeneration == sourceGeneration, self._playerItem === _playerItem else { return }
                 self.onVideoLoad?(["duration": NSNumber(value: duration),
+                                   "sourceUri": source.uri ?? "",
                                    "currentTime": NSNumber(value: Float(CMTimeGetSeconds(_playerItem.currentTime()))),
                                    "canPlayReverse": NSNumber(value: _playerItem.canPlayReverse),
                                    "canPlayFastForward": NSNumber(value: _playerItem.canPlayFastForward),
@@ -1619,6 +1626,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
                                    "target": self.reactTag as Any])
             }
 
+            guard self._sourceGeneration == sourceGeneration, self._playerItem === _playerItem else { return }
             self._videoLoadStarted = false
             self._playerObserver.attachPlayerEventListeners()
             self.applyModifiers()

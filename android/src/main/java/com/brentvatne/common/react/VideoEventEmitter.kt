@@ -57,6 +57,7 @@ enum class EventTypes(val eventName: String) {
 
 class VideoEventEmitter {
     lateinit var onVideoLoadStart: () -> Unit
+    /** Передаёт URI загруженного MediaItem для отбрасывания позднего onLoad. */
     lateinit var onVideoLoad: (
         duration: Long,
         currentPosition: Long,
@@ -65,7 +66,8 @@ class VideoEventEmitter {
         audioTracks: ArrayList<Track>,
         textTracks: ArrayList<Track>,
         videoTracks: ArrayList<VideoTrack>,
-        trackId: String?
+        trackId: String?,
+        sourceUri: String?
     ) -> Unit
     lateinit var onVideoError: (errorString: String, exception: Exception, errorCode: String) -> Unit
     lateinit var onVideoProgress: (currentPosition: Long, bufferedDuration: Long, seekableDuration: Long, currentPlaybackTime: Double) -> Unit
@@ -103,8 +105,9 @@ class VideoEventEmitter {
             onVideoLoadStart = {
                 event.dispatch(EventTypes.EVENT_LOAD_START)
             }
-            onVideoLoad = { duration, currentPosition, videoWidth, videoHeight, audioTracks, textTracks, videoTracks, trackId ->
+            onVideoLoad = { duration, currentPosition, videoWidth, videoHeight, audioTracks, textTracks, videoTracks, trackId, sourceUri ->
                 event.dispatch(EventTypes.EVENT_LOAD) {
+                    putString("sourceUri", sourceUri)
                     putDouble("duration", duration / 1000.0)
                     putDouble("currentTime", currentPosition / 1000.0)
 

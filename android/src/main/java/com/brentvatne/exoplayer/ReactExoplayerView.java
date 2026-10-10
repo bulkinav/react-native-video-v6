@@ -1563,6 +1563,10 @@ public class ReactExoplayerView extends FrameLayout implements
             // Properties that must be accessed on the main thread
             long duration = player.getDuration();
             long currentPosition = player.getCurrentPosition();
+            /** Снимок URI готового MediaItem сохраняет принадлежность события при смене HLS. */
+            MediaItem loadedItem = player.getCurrentMediaItem();
+            String loadedSourceUri = loadedItem != null && loadedItem.localConfiguration != null
+                    ? loadedItem.localConfiguration.uri.toString() : null;
             ArrayList<Track> audioTracks = getAudioTrackInfo();
             ArrayList<Track> textTracks  = getTextTrackInfo();
 
@@ -1575,7 +1579,7 @@ public class ReactExoplayerView extends FrameLayout implements
                         isUsingContentResolution = true;
                     }
                     eventEmitter.onVideoLoad.invoke(duration, currentPosition, width, height,
-                            audioTracks, textTracks, videoTracks, trackId );
+                            audioTracks, textTracks, videoTracks, trackId, loadedSourceUri );
 
                     updateSubtitleButtonVisibility();
                 });
@@ -1585,7 +1589,7 @@ public class ReactExoplayerView extends FrameLayout implements
             ArrayList<VideoTrack> videoTracks = getVideoTrackInfo();
 
             eventEmitter.onVideoLoad.invoke(duration, currentPosition, width, height,
-                    audioTracks, textTracks, videoTracks, trackId);
+                    audioTracks, textTracks, videoTracks, trackId, loadedSourceUri);
 
             updateSubtitleButtonVisibility();
             refreshControlsStyles();

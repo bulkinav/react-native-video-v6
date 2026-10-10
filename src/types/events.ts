@@ -27,6 +27,8 @@ export type TextTrack = OnTextTracksData['textTracks'][number];
 export type VideoTrack = OnVideoTracksData['videoTracks'][number];
 
 export type OnLoadData = Readonly<{
+  /** URI загруженного источника для отбрасывания позднего onLoad. */
+  sourceUri?: string;
   currentTime: number;
   duration: number;
   naturalSize: Readonly<{

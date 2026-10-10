@@ -155,6 +155,8 @@ type SubtitleStyle = Readonly<{
 }>;
 
 type OnLoadData = Readonly<{
+  /** URI загруженного источника для отбрасывания позднего onLoad. */
+  sourceUri?: string;
   currentTime: Float;
   duration: Float;
   naturalSize: Readonly<{
