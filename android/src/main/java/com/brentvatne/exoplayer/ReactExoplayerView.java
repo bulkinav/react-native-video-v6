@@ -348,6 +348,16 @@ public class ReactExoplayerView extends FrameLayout implements
         pictureInPictureReceiver = new PictureInPictureReceiver(this, themedReactContext);
     }
 
+    /** Включает распознавание pinch внутри нативного view плеера. */
+    public void setPinchGestureEnabled(boolean enabled) {
+        exoPlayerView.setPinchGestureEnabled(enabled);
+    }
+
+    /** Включает двойной тап только для сценариев с прикладной перемоткой. */
+    public void setDoubleTapGestureEnabled(boolean enabled) {
+        exoPlayerView.setDoubleTapGestureEnabled(enabled);
+    }
+
     private boolean isPlayingAd() {
         return player != null && player.isPlayingAd();
     }
@@ -364,6 +374,14 @@ public class ReactExoplayerView extends FrameLayout implements
         exoPlayerView.addOnLayoutChangeListener( (View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) ->
                 PictureInPictureUtil.applySourceRectHint(themedReactContext, pictureInPictureParamsBuilder, exoPlayerView)
         );
+        exoPlayerView.setOnZoomGesture(zoomed -> {
+            eventEmitter.getOnVideoZoom().invoke(zoomed);
+            return kotlin.Unit.INSTANCE;
+        });
+        exoPlayerView.setOnSeekGesture(delta -> {
+            eventEmitter.getOnVideoSeekGesture().invoke(delta);
+            return kotlin.Unit.INSTANCE;
+        });
         exoPlayerView.setLayoutParams(layoutParams);
         addView(exoPlayerView, 0, layoutParams);
 
@@ -403,6 +421,12 @@ public class ReactExoplayerView extends FrameLayout implements
     }
 
     public void cleanUpResources() {
+        // Закрываем окно без события выхода: view удаляется при смене CDN или экрана.
+        isFullscreen = false;
+        if (fullScreenPlayerView != null) {
+            fullScreenPlayerView.dismiss();
+            fullScreenPlayerView = null;
+        }
         stopPlayback();
         themedReactContext.removeLifecycleEventListener(this);
         releasePlayer();
@@ -2127,6 +2151,7 @@ public class ReactExoplayerView extends FrameLayout implements
             boolean isSourceEqual = source.isEquals(this.source);
             hasDrmFailed = false;
             this.source = source;
+            exoPlayerView.setVideoTitle(source.getMetadata() != null ? source.getMetadata().getTitle() : null);
             final DataSource.Factory tmpMediaDataSourceFactory =
                     DataSourceUtil.getDefaultDataSourceFactory(this.themedReactContext, bandwidthMeter,
                             source.getHeaders());
@@ -2162,6 +2187,7 @@ public class ReactExoplayerView extends FrameLayout implements
         }
 
         this.source = new Source();
+        exoPlayerView.setVideoTitle(null);
         this.mediaDataSourceFactory = null;
         clearResumePosition();
     }
@@ -2749,6 +2775,11 @@ public class ReactExoplayerView extends FrameLayout implements
 
     public void setDisableDisconnectError(boolean disableDisconnectError) {
         this.disableDisconnectError = disableDisconnectError;
+    }
+
+    /** Показывает предупреждение внутри нативного плеера. */
+    public void setPlaybackNotice(String notice) {
+        exoPlayerView.setPlaybackNotice(notice);
     }
 
     public void setFullscreen(boolean fullscreen) {

@@ -261,6 +261,10 @@ export interface ReactVideoEvents {
   onReadyForDisplay?: () => void; //Android, iOS
   onReceiveAdEvent?: (e: OnReceiveAdEventData) => void; //Android, iOS
   onRestoreUserInterfaceForPictureInPictureStop?: () => void; //iOS
+  /** Завершение нативного pinch: true приближает, false отдаляет. Android/iOS. */
+  onZoom?: (zoomed: boolean) => void;
+  /** Двойной тап в боковой зоне: смещение -20 или 20 секунд. Android/iOS. */
+  onSeekGesture?: (delta: number) => void;
   onSeek?: (e: OnSeekData) => void; //Android, iOS, Windows UWP
   onPlaybackStateChanged?: (e: OnPlaybackStateChangedData) => void; // Android, iOS
   onTimedMetadata?: (e: OnTimedMetadataData) => void; //Android, iOS

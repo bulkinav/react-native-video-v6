@@ -22,6 +22,8 @@ enum class EventTypes(val eventName: String) {
     EVENT_BANDWIDTH("onVideoBandwidthUpdate"),
     EVENT_CONTROLS_VISIBILITY_CHANGE("onControlsVisibilityChange"),
     EVENT_SEEK("onVideoSeek"),
+    EVENT_ZOOM("onVideoZoom"),
+    EVENT_SEEK_GESTURE("onVideoSeekGesture"),
     EVENT_END("onVideoEnd"),
     EVENT_FULLSCREEN_WILL_PRESENT("onVideoFullscreenPlayerWillPresent"),
     EVENT_FULLSCREEN_DID_PRESENT("onVideoFullscreenPlayerDidPresent"),
@@ -74,6 +76,10 @@ class VideoEventEmitter {
     lateinit var onVideoBandwidthUpdate: (bitRateEstimate: Long, height: Int, width: Int, trackId: String?) -> Unit
     lateinit var onVideoPlaybackStateChanged: (isPlaying: Boolean, isSeeking: Boolean) -> Unit
     lateinit var onVideoSeek: (currentPosition: Long, seekTime: Long) -> Unit
+    /** Передаёт направление завершённого нативного pinch. */
+    lateinit var onVideoZoom: (zoomed: Boolean) -> Unit
+    /** Передаёт смещение двойного тапа без изменения позиции в обход приложения. */
+    lateinit var onVideoSeekGesture: (delta: Int) -> Unit
     lateinit var onVideoEnd: () -> Unit
     lateinit var onVideoFullscreenPlayerWillPresent: () -> Unit
     lateinit var onVideoFullscreenPlayerDidPresent: () -> Unit
@@ -102,6 +108,12 @@ class VideoEventEmitter {
         if (dispatcher != null) {
             val event = EventBuilder(surfaceId, view.id, dispatcher)
 
+            onVideoZoom = { zoomed ->
+                event.dispatch(EventTypes.EVENT_ZOOM) { putBoolean("zoomed", zoomed) }
+            }
+            onVideoSeekGesture = { delta ->
+                event.dispatch(EventTypes.EVENT_SEEK_GESTURE) { putInt("delta", delta) }
+            }
             onVideoLoadStart = {
                 event.dispatch(EventTypes.EVENT_LOAD_START)
             }

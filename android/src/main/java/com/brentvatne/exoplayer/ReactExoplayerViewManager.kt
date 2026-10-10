@@ -103,6 +103,24 @@ class ReactExoplayerViewManager(private val config: ReactExoplayerConfig) : View
         }
     }
 
+    /** Передаёт предупреждение в view, которое переносится в fullscreen. */
+    @ReactProp(name = "playbackNotice")
+    fun setPlaybackNotice(videoView: ReactExoplayerView, notice: String?) {
+        videoView.setPlaybackNotice(notice)
+    }
+
+    /** Включает нативный pinch; без обработчика жесты выключены. */
+    @ReactProp(name = "pinchGestureEnabled", defaultBoolean = false)
+    fun setPinchGestureEnabled(videoView: ReactExoplayerView, enabled: Boolean) {
+        videoView.setPinchGestureEnabled(enabled)
+    }
+
+    /** Включает нативные зоны перемотки по двойному тапу. */
+    @ReactProp(name = "doubleTapGestureEnabled", defaultBoolean = false)
+    fun setDoubleTapGestureEnabled(videoView: ReactExoplayerView, enabled: Boolean) {
+        videoView.setDoubleTapGestureEnabled(enabled)
+    }
+
     @ReactProp(name = PROP_REPEAT, defaultBoolean = false)
     fun setRepeat(videoView: ReactExoplayerView, repeat: Boolean) {
         videoView.setRepeatModifier(repeat)

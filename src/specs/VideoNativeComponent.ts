@@ -345,6 +345,14 @@ export interface VideoNativeProps extends ViewProps {
   disableFocus?: boolean; // android
   maxBitRate?: Float;
   resizeMode?: WithDefault<string, 'none'>;
+  /** Включает нативный pinch при наличии обработчика приложения. */
+  pinchGestureEnabled?: boolean;
+  /** Включает боковые зоны двойного тапа при наличии обработчика. */
+  doubleTapGestureEnabled?: boolean;
+  /** Передаёт направление завершённого pinch. */
+  onVideoZoom?: DirectEventHandler<Readonly<{zoomed: boolean}>>;
+  /** Передаёт смещение двойного тапа в секундах. */
+  onVideoSeekGesture?: DirectEventHandler<Readonly<{delta: Int32}>>;
   repeat?: boolean;
   automaticallyWaitsToMinimizeStalling?: boolean;
   shutterColor?: Int32;
@@ -367,6 +375,8 @@ export interface VideoNativeProps extends ViewProps {
   ignoreSilentSwitch?: WithDefault<string, 'inherit'>; // ios, 'inherit'
   mixWithOthers?: WithDefault<string, 'inherit'>; // ios, 'inherit'
   rate?: Float;
+  /** Предупреждение внутри нативного view. */
+  playbackNotice?: string;
   fullscreen?: boolean; // ios, false
   fullscreenAutorotate?: boolean;
   fullscreenOrientation?: WithDefault<string, 'all'>;

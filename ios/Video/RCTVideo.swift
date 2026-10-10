@@ -55,6 +55,18 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     var _ignoreSilentSwitch: String = "inherit" // inherit, ignore, obey
     var _mixWithOthers: String = "inherit" // inherit, mix, duck
     private var _resizeMode: String = "cover"
+    /** Нативный текст остаётся в окне AVPlayerViewController при fullscreen. */
+    private let playbackNoticeView: UILabel = {
+        let label = UILabel()
+        label.textColor = .white
+        label.font = .systemFont(ofSize: 14)
+        label.backgroundColor = UIColor.white.withAlphaComponent(0.3)
+        label.alpha = 0.6
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.isHidden = true
+        return label
+    }()
     private var _fullscreen = false
     private var _fullscreenAutorotate = true
     private var _fullscreenOrientation: String = "all"
@@ -106,6 +118,87 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
     private var _pip: RCTPictureInPicture?
     private var _isPictureInPictureActive = false
+
+    /** Колбэки нативных жестов сохраняют прикладные правила масштаба и перемотки. */
+    @objc var onVideoZoom: RCTDirectEventBlock?
+    @objc var onVideoSeekGesture: RCTDirectEventBlock?
+    @objc var pinchGestureEnabled = false {
+        didSet {
+            #if os(iOS)
+                pinchGesture.isEnabled = pinchGestureEnabled
+            #endif
+        }
+    }
+    @objc var doubleTapGestureEnabled = false {
+        didSet {
+            #if os(iOS)
+                doubleTapGesture.isEnabled = doubleTapGestureEnabled
+            #endif
+        }
+    }
+    #if os(iOS)
+        private lazy var pinchGesture: UIPinchGestureRecognizer = {
+            let gesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
+            gesture.delegate = self
+            gesture.isEnabled = pinchGestureEnabled
+            return gesture
+        }()
+        private lazy var doubleTapGesture: UITapGestureRecognizer = {
+            let gesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapGesture(_:)))
+            gesture.numberOfTapsRequired = 2
+            gesture.delegate = self
+            gesture.isEnabled = doubleTapGestureEnabled
+            return gesture
+        }()
+
+        /** Переносит распознаватели вместе с native controls в fullscreen. */
+        private func attachPlayerGestures(to view: UIView) {
+            view.addGestureRecognizer(pinchGesture)
+            view.addGestureRecognizer(doubleTapGesture)
+        }
+
+        /** Передаёт направление только успешно завершённого pinch. */
+        @objc private func handlePinchGesture(_ gesture: UIPinchGestureRecognizer) {
+            guard gesture.state == .ended, gesture.scale.isFinite, gesture.scale > 0, gesture.scale != 1 else { return }
+            onVideoZoom?(["zoomed": gesture.scale > 1])
+        }
+
+        /** Выбирает боковую зону с прежними отступами 100/80/50 пунктов. */
+        private func seekGestureDelta(at point: CGPoint, size: CGSize) -> Int? {
+            let zoneWidth = size.width / 3 - 50
+            guard zoneWidth > 0, point.y >= 100, point.y <= size.height - 80 else { return nil }
+            if point.x >= 0, point.x <= zoneWidth { return -20 }
+            if point.x >= size.width - zoneWidth, point.x <= size.width { return 20 }
+            return nil
+        }
+
+        /** Передаёт двойной тап без обхода истории, CDN и защиты seek приложения. */
+        @objc private func handleDoubleTapGesture(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended, let view = gesture.view,
+                  let delta = seekGestureDelta(at: gesture.location(in: view), size: view.bounds.size) else { return }
+            onVideoSeekGesture?(["delta": delta])
+        }
+
+        /** Не перехватывает кнопки и ползунок AVPlayerViewController. */
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            if gestureRecognizer === doubleTapGesture {
+                var view = touch.view
+                while let current = view {
+                    if current is UIControl { return false }
+                    view = current.superview
+                }
+                guard let target = gestureRecognizer.view else { return false }
+                return seekGestureDelta(at: touch.location(in: target), size: target.bounds.size) != nil
+            }
+            return true
+        }
+
+        /** Разрешает pinch одновременно с системными распознавателями controls. */
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            gestureRecognizer === pinchGesture || otherGestureRecognizer === pinchGesture
+        }
+    #endif
 
     // Events
     @objc var onVideoLoadStart: RCTDirectEventBlock?
@@ -205,6 +298,9 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
             _imaAdsManager = RCTIMAAdsManager(video: self, isPictureInPictureActive: isPictureInPictureActive)
         #endif
 
+        #if os(iOS)
+            attachPlayerGestures(to: self)
+        #endif
         _eventDispatcher = eventDispatcher
 
         AudioSessionManager.shared.registerView(view: self)
@@ -1095,6 +1191,13 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         _chapters = chapters
     }
 
+    /** Показывает предупреждение без перезапуска воспроизведения. */
+    @objc
+    func setPlaybackNotice(_ notice: String?) {
+        playbackNoticeView.text = notice
+        playbackNoticeView.isHidden = notice?.isEmpty != false
+    }
+
     @objc
     func setFullscreen(_ fullscreen: Bool) {
         let alreadyFullscreenPresented = _presentingViewController?.presentedViewController != nil
@@ -1223,6 +1326,23 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
         viewController.view.frame = self.bounds
         viewController.player = player
+        playbackNoticeView.removeFromSuperview()
+        let overlay = viewController.contentOverlayView ?? viewController.view!
+        // Существующий layout растягивает прямые subviews overlay; текст живёт внутри контейнера.
+        let noticeContainer = UIView(frame: overlay.bounds)
+        noticeContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        noticeContainer.isUserInteractionEnabled = false
+        overlay.addSubview(noticeContainer)
+        playbackNoticeView.translatesAutoresizingMaskIntoConstraints = false
+        noticeContainer.addSubview(playbackNoticeView)
+        NSLayoutConstraint.activate([
+            playbackNoticeView.leadingAnchor.constraint(equalTo: noticeContainer.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            playbackNoticeView.trailingAnchor.constraint(equalTo: noticeContainer.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            playbackNoticeView.bottomAnchor.constraint(equalTo: noticeContainer.safeAreaLayoutGuide.bottomAnchor, constant: -100),
+        ])
+        #if os(iOS)
+            attachPlayerGestures(to: viewController.view)
+        #endif
 
         // Set the initial playback speed in controls to match playback rate
         if #available(iOS 16.0, tvOS 16.0, *) {
@@ -1235,6 +1355,9 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     }
 
     func usePlayerLayer() {
+        #if os(iOS)
+            attachPlayerGestures(to: self)
+        #endif
         if let _player {
             _playerLayer = AVPlayerLayer(player: _player)
             _playerLayer?.frame = self.bounds
@@ -1259,6 +1382,11 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
     @objc
     func setControls(_ controls: Bool) {
+        // Смена серии отключает inline-controls; fullscreen controller должен оставаться на месте.
+        if _fullscreenPlayerPresented || _presentingViewController != nil {
+            _controls = controls
+            return
+        }
         if _controls != controls || ((_playerLayer == nil) && (_playerViewController == nil)) {
             _controls = controls
             #if os(iOS)
@@ -1463,6 +1591,12 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         _chapters = nil
         _selectedTextTrackCriteria = SelectedTrackCriteria.none()
         _selectedAudioTrackCriteria = SelectedTrackCriteria.none()
+        // Удаление view при CDN failover не оставляет пустое модальное окно.
+        if _presentingViewController != nil {
+            _playerViewController?.rctDelegate = nil
+            _playerViewController?.dismiss(animated: false)
+            _fullscreenPlayerPresented = false
+        }
         _presentingViewController = nil
 
         ReactNativeVideoManager.shared.onInstanceRemoved(id: instanceId, player: _player as Any)
@@ -2106,4 +2240,8 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
             }
         }
     }
+#endif
+
+#if os(iOS)
+    extension RCTVideo: UIGestureRecognizerDelegate {}
 #endif

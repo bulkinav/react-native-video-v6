@@ -303,6 +303,11 @@ class RCTPlayerObserver: NSObject, AVPlayerItemMetadataOutputPushDelegate, AVPla
         }
     }
 
+    /** Сохраняет fullscreen controller и его delegate за окном PiP, включая неуспешный запуск. */
+    func playerViewControllerShouldAutomaticallyDismissAtPictureInPictureStart(_: AVPlayerViewController) -> Bool {
+        return false
+    }
+
     func playerViewControllerDidStartPictureInPicture(_: AVPlayerViewController) {
         guard let _handlers else { return }
 
@@ -316,9 +321,14 @@ class RCTPlayerObserver: NSObject, AVPlayerItemMetadataOutputPushDelegate, AVPla
     }
 
     func playerViewController(
-        _: AVPlayerViewController,
+        _ playerViewController: AVPlayerViewController,
         restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
     ) {
+        // Fullscreen не закрывался при входе в PiP: восстанавливать другое окно не требуется.
+        if playerViewController.presentingViewController != nil {
+            completionHandler(true)
+            return
+        }
         guard let _handlers else { return }
 
         _handlers.handleRestoreUserInterfaceForPictureInPictureStop()

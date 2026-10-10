@@ -3,13 +3,24 @@ package com.brentvatne.exoplayer
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
+import android.text.TextUtils
 import android.util.AttributeSet
+import android.view.Gravity
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.LayoutInflater
 import android.view.SurfaceView
 import android.view.View
 import android.view.View.MeasureSpec
+import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
@@ -21,10 +32,111 @@ import com.brentvatne.common.api.ResizeMode
 import com.brentvatne.common.api.SubtitleStyle
 import com.brentvatne.common.api.ViewType
 import com.brentvatne.react.R
+import kotlin.math.roundToInt
 
 @UnstableApi
 class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0) :
     FrameLayout(context, attrs, defStyleAttr) {
+
+    /** Жесты привязаны к view, которое переносится в системный fullscreen. */
+    var pinchGestureEnabled = false
+    var doubleTapGestureEnabled = false
+    var onZoomGesture: ((Boolean) -> Unit)? = null
+    var onSeekGesture: ((Int) -> Unit)? = null
+    private var gestureConsumed = false
+    private var tapOnControls = false
+    private var pinchScale = 1f
+    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        /** Начинает pinch отдельно от одиночных тапов native controls. */
+        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+            pinchScale = 1f
+            gestureConsumed = true
+            return true
+        }
+
+        /** Накапливает масштаб до завершения жеста. */
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            pinchScale *= detector.scaleFactor
+            return true
+        }
+
+        /** Передаёт только корректный завершённый pinch. */
+        override fun onScaleEnd(detector: ScaleGestureDetector) {
+            if (pinchGestureEnabled && pinchScale.isFinite() && pinchScale > 0f && pinchScale != 1f) {
+                onZoomGesture?.invoke(pinchScale > 1f)
+            }
+        }
+    }).apply {
+        // Pinch требует двух пальцев, а не double-tap drag или кнопки стилуса.
+        isQuickScaleEnabled = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) isStylusScaleEnabled = false
+    }
+    private val tapDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        /** Разрешает детектору отслеживать второе нажатие. */
+        override fun onDown(event: MotionEvent): Boolean = true
+
+        /** Распознаёт двойной тап только в прежних боковых зонах КИНОТВ. */
+        override fun onDoubleTap(event: MotionEvent): Boolean {
+            if (!doubleTapGestureEnabled || tapOnControls || gestureConsumed) return false
+            val density = resources.displayMetrics.density
+            val zoneWidth = width / 3f - 50f * density
+            if (event.x < 0f || event.x > width || event.y < 100f * density || event.y > height - 80f * density || zoneWidth <= 0f) return false
+            val delta = when {
+                event.x <= zoneWidth -> -20
+                event.x >= width - zoneWidth -> 20
+                else -> return false
+            }
+            gestureConsumed = true
+            onSeekGesture?.invoke(delta)
+            return true
+        }
+    })
+
+    /** Сохраняет кнопки и seekbar нативных controls вне зон двойного тапа. */
+    private fun touchesControl(view: View, x: Float, y: Float): Boolean {
+        if (view.visibility != View.VISIBLE || x < 0 || y < 0 || x > view.width || y > view.height) return false
+        if (view is DefaultTimeBar || (view !== playerView && view.isClickable)) return true
+        if (view is ViewGroup) {
+            for (index in view.childCount - 1 downTo 0) {
+                val child = view.getChildAt(index)
+                if (touchesControl(child, x - child.left + view.scrollX, y - child.top + view.scrollY)) return true
+            }
+        }
+        return false
+    }
+
+    /** Отменяет касания дочернего controls только после распознавания жеста. */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (!pinchGestureEnabled && !doubleTapGestureEnabled) return super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            gestureConsumed = false
+            tapOnControls = touchesControl(playerView, event.x - playerView.left, event.y - playerView.top)
+        }
+        val wasConsumed = gestureConsumed
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL) pinchScale = 1f
+        if (pinchGestureEnabled) scaleDetector.onTouchEvent(event)
+        if (doubleTapGestureEnabled) {
+            if (event.pointerCount > 1 || gestureConsumed) {
+                val cancel = MotionEvent.obtain(event)
+                cancel.action = MotionEvent.ACTION_CANCEL
+                tapDetector.onTouchEvent(cancel)
+                cancel.recycle()
+            } else {
+                tapDetector.onTouchEvent(event)
+            }
+        }
+        if (gestureConsumed) {
+            if (!wasConsumed) {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                val cancel = MotionEvent.obtain(event)
+                cancel.action = MotionEvent.ACTION_CANCEL
+                super.dispatchTouchEvent(cancel)
+                cancel.recycle()
+            }
+            return true
+        }
+        return super.dispatchTouchEvent(event)
+    }
 
     private var localStyle = SubtitleStyle()
     private var pendingResizeMode: Int? = null
@@ -52,15 +164,94 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
         visibility = View.GONE
     }
 
+    /** Однострочное название не перекрывает Live и обрезается по ширине плеера. */
+    private val titleView = TextView(context).apply {
+        setTextColor(Color.WHITE)
+        textSize = 18f
+        setSingleLine(true)
+        ellipsize = TextUtils.TruncateAt.END
+        setShadowLayer(2f * resources.displayMetrics.density, 0f, 0f, Color.BLACK)
+        visibility = View.GONE
+    }
+    /** Предупреждение остаётся поверх видео при переносе view в fullscreen. */
+    private val noticeView = TextView(context).apply {
+        setTextColor(Color.WHITE)
+        textSize = 14f
+        gravity = Gravity.CENTER
+        setBackgroundColor(Color.argb(77, 255, 255, 255))
+        alpha = 0.6f
+        val padding = (5f * resources.displayMetrics.density).roundToInt()
+        setPadding(padding, padding, padding, padding)
+        visibility = View.GONE
+    }
+    private val header = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(liveBadge, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+            marginEnd = (8f * resources.displayMetrics.density).roundToInt()
+        })
+        addView(titleView, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+    }
+
     private var playerView = createPlayerView(currentViewType)
 
     init {
         attachPlayerView(playerView)
 
         // Add live badge with its own layout parameters
-        val liveBadgeLayoutParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
-        liveBadgeLayoutParams.setMargins(16, 16, 16, 16)
-        addView(liveBadge, liveBadgeLayoutParams)
+        val headerLayoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.LEFT)
+        addView(header, headerLayoutParams)
+        addView(noticeView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+            updateHeaderInsets(insets)
+            updateNoticeInsets(insets)
+            insets
+        }
+    }
+
+    /** Показывает metadata.title; пустое название очищает предыдущий материал. */
+    fun setVideoTitle(title: String?) {
+        titleView.text = title?.trim()
+        titleView.visibility = if (titleView.text.isNullOrEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** Добавляет только ту часть системных отступов, которую ещё не покрыл родитель. */
+    private fun updateHeaderInsets(insets: WindowInsetsCompat?) {
+        val safe = insets?.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()) ?: Insets.NONE
+        val location = IntArray(2)
+        getLocationInWindow(location)
+        val margin = (16f * resources.displayMetrics.density).roundToInt()
+        val params = header.layoutParams as LayoutParams
+        val left = margin + maxOf(0, safe.left - location[0])
+        val top = margin + maxOf(0, safe.top - location[1])
+        val right = margin + maxOf(0, safe.right - (rootView.width - location[0] - width))
+        if (params.leftMargin != left || params.topMargin != top || params.rightMargin != right) {
+            params.setMargins(left, top, right, 0)
+            header.layoutParams = params
+        }
+    }
+
+    /** Пустой текст скрывает предупреждение без изменения источника видео. */
+    fun setPlaybackNotice(notice: String?) {
+        noticeView.text = notice
+        noticeView.visibility = if (notice.isNullOrEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** Держит предупреждение выше controls и вне системных панелей в обеих ориентациях. */
+    private fun updateNoticeInsets(insets: WindowInsetsCompat?) {
+        val safe = insets?.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()) ?: Insets.NONE
+        val location = IntArray(2)
+        getLocationInWindow(location)
+        val density = resources.displayMetrics.density
+        val horizontal = (20f * density).roundToInt()
+        val params = noticeView.layoutParams as LayoutParams
+        val left = horizontal + maxOf(0, safe.left - location[0])
+        val right = horizontal + maxOf(0, safe.right - (rootView.width - location[0] - width))
+        val bottom = (100f * density).roundToInt() + maxOf(0, safe.bottom - (rootView.height - location[1] - height))
+        if (params.leftMargin != left || params.rightMargin != right || params.bottomMargin != bottom) {
+            params.setMargins(left, 0, right, bottom)
+            noticeView.layoutParams = params
+        }
     }
 
     fun setPlayer(player: ExoPlayer?) {
@@ -360,8 +551,11 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
         post(layoutRunnable)
     }
 
+    /** Пересчитывает отступы при ориентации, fullscreen и изменении размеров view. */
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
+        updateHeaderInsets(ViewCompat.getRootWindowInsets(this))
+        updateNoticeInsets(ViewCompat.getRootWindowInsets(this))
 
         if (changed) {
             pendingResizeMode?.let { resizeMode ->

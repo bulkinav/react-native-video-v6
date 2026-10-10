@@ -131,6 +131,8 @@ const Video = forwardRef<VideoRef, ReactVideoProps>(
       onError,
       onProgress,
       onSeek,
+      onZoom,
+      onSeekGesture,
       onEnd,
       onBuffer,
       onBandwidthUpdate,
@@ -164,6 +166,17 @@ const Video = forwardRef<VideoRef, ReactVideoProps>(
     ref,
   ) => {
     const nativeRef = useRef<ElementRef<typeof NativeVideoComponent>>(null);
+
+    /** Передаёт результат нативного pinch без объектов bridge в публичном API. */
+    const onVideoZoom = useCallback(
+      (event: NativeSyntheticEvent<{zoomed: boolean}>) => onZoom?.(event.nativeEvent.zoomed),
+      [onZoom],
+    );
+    /** Передаёт смещение нативного двойного тапа прикладному обработчику seek. */
+    const onVideoSeekGesture = useCallback(
+      (event: NativeSyntheticEvent<{delta: number}>) => onSeekGesture?.(event.nativeEvent.delta),
+      [onSeekGesture],
+    );
 
     const isPosterDeprecated = typeof poster === 'string';
 
@@ -878,6 +891,10 @@ const Video = forwardRef<VideoRef, ReactVideoProps>(
           src={src}
           style={_style}
           resizeMode={resizeMode}
+          pinchGestureEnabled={!!onZoom}
+          doubleTapGestureEnabled={!!onSeekGesture}
+          onVideoZoom={onZoom ? onVideoZoom : undefined}
+          onVideoSeekGesture={onSeekGesture ? onVideoSeekGesture : undefined}
           restoreUserInterfaceForPIPStopCompletionHandler={
             _restoreUserInterfaceForPIPStopCompletionHandler
           }

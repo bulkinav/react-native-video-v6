@@ -316,6 +316,8 @@ export interface ReactVideoRenderLoaderProps {
 }
 
 export interface ReactVideoProps extends ReactVideoEvents, ViewProps {
+  /** Текст предупреждения поверх видео, включая нативный fullscreen. */
+  playbackNotice?: string;
   source?: ReactVideoSource;
   /** @deprecated Use source.drm */
   drm?: Drm;
