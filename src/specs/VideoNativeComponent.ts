@@ -296,6 +296,8 @@ type OnReceiveAdEventData = Readonly<{
 }>;
 
 export type OnVideoErrorData = Readonly<{
+  /** URI источника ошибки для отбрасывания поздних событий предыдущего HLS. */
+  sourceUri?: string;
   error: Readonly<{
     errorString?: string; // android | web
     errorException?: string; // android

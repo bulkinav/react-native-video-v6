@@ -11,6 +11,8 @@ import React
 class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverHandler {
     var _player: AVPlayer?
     private var _playerItem: AVPlayerItem?
+    /** Исходный URI элемента сохраняет подписанные параметры без преобразований AVURLAsset. */
+    private var _playerItemSourceUri: String?
     private var _source: VideoSource?
     /** Поколение source отменяет асинхронное завершение предыдущего HLS. */
     private var _sourceGeneration = 0
@@ -560,6 +562,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
         _player?.pause()
         _playerItem = playerItem
+        _playerItemSourceUri = _source?.uri
         _playerObserver.playerItem = _playerItem
         setPreferredForwardBufferDuration(_preferredForwardBufferDuration)
         setPlaybackRange(playerItem, withCropStart: _source?.cropStart, withCropEnd: _source?.cropEnd)
@@ -636,6 +639,8 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     @objc
     func setSrc(_ source: NSDictionary!) {
         _sourceGeneration += 1
+        // Запоминаем поколение запроса до асинхронной подготовки HLS.
+        let sourceGeneration = _sourceGeneration
         if self.isSetSourceOngoing || self.nextSource != nil {
             DebugLog("setSrc buffer request")
             self._player?.replaceCurrentItem(with: nil)
@@ -674,6 +679,8 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
             self._drmManager = nil
             self._playerObserver.playerItem = nil
 
+            // URI относится к этой подготовке, даже если новый HLS уже ожидает в nextSource.
+            let sourceUri = self._source?.uri
             // perform on next run loop, otherwise other passed react-props may not be set
             RCTVideoUtils.delay { [weak self] in
                 do {
@@ -685,13 +692,16 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
                     DebugLog("An error occurred: \(error.localizedDescription)")
 
                     if let self {
-                        self.onVideoError?(["error": error.localizedDescription])
+                        // Ошибка старой подготовки не должна завершать новый HLS и его PiP.
+                        if sourceGeneration == self._sourceGeneration {
+                            self.onVideoError?(["error": error.localizedDescription, "sourceUri": sourceUri ?? ""])
+
+                            if let player = self._player {
+                                NowPlayingInfoCenterManager.shared.removePlayer(player: player)
+                            }
+                        }
                         self.isSetSourceOngoing = false
                         self.applyNextSource()
-
-                        if let player = self._player {
-                            NowPlayingInfoCenterManager.shared.removePlayer(player: player)
-                        }
                     }
                 }
             }
@@ -1641,6 +1651,8 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         guard let _playerItem else { return }
         onVideoError?(
             [
+                // Снимок URI элемента позволяет JS отклонить позднюю ошибку прежнего HLS.
+                "sourceUri": _playerItemSourceUri ?? "",
                 "error": [
                     "code": NSNumber(value: (_playerItem.error! as NSError).code),
                     "localizedDescription": _playerItem.error?.localizedDescription == nil ? "" : _playerItem.error?.localizedDescription as Any,
@@ -1759,10 +1771,14 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     @objc
     func handleDidFailToFinishPlaying(notification: NSNotification!) {
         guard onVideoError != nil else { return }
+        // Уведомление старого элемента не относится к текущему HLS.
+        guard let item = notification.object as? AVPlayerItem, item === _playerItem else { return }
 
         let error: NSError! = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
         onVideoError?(
             [
+                // Исходный URI сохраняется в событии до доставки в новый JS-обработчик.
+                "sourceUri": _playerItemSourceUri ?? "",
                 "error": [
                     "code": NSNumber(value: (error as NSError).code),
                     "localizedDescription": error.localizedDescription,
