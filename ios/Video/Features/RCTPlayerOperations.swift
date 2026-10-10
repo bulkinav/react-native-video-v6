@@ -141,6 +141,8 @@ enum RCTPlayerOperations {
 
         guard CMTimeCompare(current, cmSeekTime) != 0 else {
             // skip if there is no diff in current time and seek time
+            // Уже достигнутая позиция также подтверждает завершение команды seek.
+            completion(true)
             return
         }
 

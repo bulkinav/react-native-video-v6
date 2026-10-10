@@ -238,6 +238,7 @@ public class ReactExoplayerView extends FrameLayout implements
      */
     private boolean isSeeking = false;
     private long seekPosition = -1;
+    private boolean pendingSeekEvent = false;
     private boolean hasVideoEnded = false;
 
     // Props from React
@@ -1271,6 +1272,7 @@ public class ReactExoplayerView extends FrameLayout implements
     }
 
     private void releasePlayer() {
+        pendingSeekEvent = false;
         if (player != null) {
             if(playbackServiceBinder != null) {
                 playbackServiceBinder.getService().unregisterPlayer(player);
@@ -1466,6 +1468,10 @@ public class ReactExoplayerView extends FrameLayout implements
 
     @Override
     public void onEvents(@NonNull Player player, Player.Events events) {
+        // Подтверждаем также seek внутри буфера: он не обязан менять isPlaying.
+        if (this.player == player && player.getPlaybackState() == Player.STATE_READY) {
+            emitPendingSeekEvent();
+        }
         if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) || events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED)) {
             int playbackState = player.getPlaybackState();
             boolean playWhenReady = player.getPlayWhenReady();
@@ -1877,13 +1883,20 @@ public class ReactExoplayerView extends FrameLayout implements
         return textTracks;
     }
 
+    /** Отправляет подтверждение одной перемотки без повторов при смене состояния playback. */
+    private void emitPendingSeekEvent() {
+        if (!pendingSeekEvent || player == null) return;
+        pendingSeekEvent = false;
+        eventEmitter.onVideoSeek.invoke(player.getCurrentPosition(), seekPosition);
+    }
+
     private void onBuffering(boolean buffering) {
         if (isBuffering == buffering) {
             return;
         }
 
         if (isPaused && isSeeking && !buffering) {
-            eventEmitter.onVideoSeek.invoke(player.getCurrentPosition(), seekPosition);
+            emitPendingSeekEvent();
             isSeeking = false;
         }
 
@@ -1896,6 +1909,7 @@ public class ReactExoplayerView extends FrameLayout implements
         if (reason == Player.DISCONTINUITY_REASON_SEEK) {
             isSeeking = true;
             seekPosition = newPosition.positionMs;
+            pendingSeekEvent = true;
             if (isUsingContentResolution) {
                 // We need to update the selected track to make sure that it still matches user selection if track list has changed in this period
                 setSelectedTrack(C.TRACK_TYPE_VIDEO, videoTrackType, videoTrackValue);
@@ -2011,7 +2025,7 @@ public class ReactExoplayerView extends FrameLayout implements
     @Override
     public void onIsPlayingChanged(boolean isPlaying) {
         if (isPlaying && isSeeking) {
-            eventEmitter.onVideoSeek.invoke(player.getCurrentPosition(), seekPosition);
+            emitPendingSeekEvent();
         }
         PictureInPictureUtil.applyPlayingStatus(themedReactContext, pictureInPictureParamsBuilder, pictureInPictureReceiver, !isPlaying);
         eventEmitter.onVideoPlaybackStateChanged.invoke(isPlaying, isSeeking);
