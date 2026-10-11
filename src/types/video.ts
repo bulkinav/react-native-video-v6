@@ -318,6 +318,8 @@ export interface ReactVideoRenderLoaderProps {
 export interface ReactVideoProps extends ReactVideoEvents, ViewProps {
   /** Текст предупреждения поверх видео, включая нативный fullscreen. */
   playbackNotice?: string;
+  /** Две строки заголовка и отдельный возрастной лейбл нативного плеера. */
+  playbackHeader?: {title: string; subtitle?: string; ageRating?: string};
   source?: ReactVideoSource;
   /** @deprecated Use source.drm */
   drm?: Drm;

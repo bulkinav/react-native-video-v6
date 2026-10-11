@@ -10,6 +10,9 @@ try {
   const source = path.resolve(__dirname, '../src/types/video').replaceAll('\\', '/');
   fs.writeFileSync(fixture, `import type { ReactVideoProps, ReactVideoRenderLoaderProps } from '${source}';
 const notice: ReactVideoProps['playbackNotice'] = 'Предупреждение';
+const header: ReactVideoProps['playbackHeader'] = {title: 'Фильм', subtitle: 'Серия 1', ageRating: '18+'};
+// @ts-expect-error Возрастной лейбл принимает текст.
+const invalidHeader: ReactVideoProps['playbackHeader'] = {title: 'Фильм', ageRating: 18};
 // @ts-expect-error Предупреждение принимает текст, а не число.
 const invalid: ReactVideoProps['playbackNotice'] = 42;
 // @ts-expect-error Предупреждение не является prop загрузчика.

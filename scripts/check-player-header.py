@@ -5,12 +5,20 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
+bridge = (root / 'android/src/main/java/com/brentvatne/exoplayer/ReactExoplayerView.java').read_text()
+assert re.search(r'protected void setIsInPictureInPicture\(boolean isInPictureInPicture\) \{\s*exoPlayerView.setIsInPictureInPicture\(isInPictureInPicture\);', bridge), 'PiP должен скрывать header до раннего выхода fullscreen'
+
 source = (root / 'android/src/main/java/com/brentvatne/exoplayer/ExoPlayerView.kt').read_text()
 method = source[source.index('    private fun updateHeaderInsets('):source.index('    /** Пустой текст скрывает')]
 method += source[source.index('    private fun updateNoticeInsets('):source.index('    fun setPlayer(')]
 layouts = re.findall(r'    override fun onLayout\(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int\) \{.*?\n    \}', source, re.S)
 assert len(layouts) == 1, 'ExoPlayerView должен содержать один override onLayout'
 method += layouts[0]
+method += source[source.index('    fun setVideoTitle('):source.index('    /** Добавляет только ту часть')]
+method += source[source.index('    fun setControllerVisibilityListener('):source.index('    override fun addOnLayoutChangeListener(')]
+binding = re.search(r'        targetPlayerView.setControllerVisibilityListener\(PlayerView.ControllerVisibilityListener \{ visibility ->.*?\n        header.visibility = .*?\n', source, re.S)
+assert binding, 'Каждый новый PlayerView должен синхронизировать заголовок с controls'
+method += '    /** Подключает исходный listener нового PlayerView. */\n    fun bindController(targetPlayerView: PlayerView) {\n' + binding.group() + '    }\n'
 program = '''import kotlin.math.roundToInt
 class Insets(val left: Int, val top: Int, val right: Int, val bottom: Int = 0) { companion object { val NONE = Insets(0, 0, 0) } }
 class WindowInsetsCompat(val safe: Insets) {
@@ -30,7 +38,29 @@ class LayoutParams {
         leftMargin = left; topMargin = top; rightMargin = right; bottomMargin = bottom
     }
 }
-class Header { var layoutParams: Any = LayoutParams() }
+class Header {
+    var layoutParams: Any = LayoutParams(); var visibility = View.VISIBLE; var alpha = 1f
+    val animator = Animator(this)
+    /** Возвращает управляемую тестом анимацию. */
+    fun animate() = animator
+}
+class Animator(private val header: Header) {
+    var duration = 0L
+    private var targetAlpha = 1f
+    private var endAction: (() -> Unit)? = null
+    /** Отменяет старое завершение, как ViewPropertyAnimator. */
+    fun cancel() { endAction = null }
+    /** Сохраняет целевую прозрачность. */
+    fun alpha(value: Float): Animator { targetAlpha = value; return this }
+    /** Сохраняет длительность fade. */
+    fun setDuration(value: Long): Animator { duration = value; return this }
+    /** Откладывает завершение до проверки промежуточного состояния. */
+    fun withEndAction(action: () -> Unit): Animator { endAction = action; return this }
+    /** Завершает только неотменённую анимацию. */
+    fun finish() { val action = endAction; endAction = null; if (action != null) { header.alpha = targetAlpha; action() } }
+}
+class View { companion object { const val GONE = 8; const val VISIBLE = 0 } }
+class TextView { var text: String? = null; var visibility = View.GONE }
 class Metrics { var density = 1f }
 class Resources { val displayMetrics = Metrics() }
 class Root { var width = 1080; var height = 1920 }
@@ -43,8 +73,25 @@ object ViewCompat {
     /** Возвращает текущие отступы тестового окна. */
     fun getRootWindowInsets(view: Check) = view.insets
 }
-class PlayerView { var resizeMode = 0 }
+class PlayerView {
+    fun interface ControllerVisibilityListener {
+        /** Передаёт новую видимость controls. */
+        fun onVisibilityChanged(visibility: Int)
+    }
+    var resizeMode = 0
+    var isControllerFullyVisible = false
+    private var listener: ControllerVisibilityListener? = null
+    /** Подключает настоящий callback проверяемого view. */
+    fun setControllerVisibilityListener(value: ControllerVisibilityListener?) { listener = value }
+    /** Имитирует тап и автоматическое скрытие controls без собственного таймера заголовка. */
+    fun changeVisibility(value: Int) { isControllerFullyVisible = value == View.VISIBLE; listener?.onVisibilityChanged(value) }
+}
 class Check : FrameLayout() {
+    val titleView = TextView(); val episodeTitleView = TextView(); val ageRatingView = TextView()
+    private var videoTitle: String? = null
+    private var playbackTitle: String? = null
+    private var controllerVisibilityListener: PlayerView.ControllerVisibilityListener? = null
+    private var isInPictureInPicture = false
     val playerView = PlayerView()
     var pendingResizeMode: Int? = null
     var insets: WindowInsetsCompat? = null
@@ -112,7 +159,82 @@ fun main() {
     layout.onLayout(true, 0, 0, 1080, 1920)
     check(layout.playerView.resizeMode == 3)
     check(layout.layoutCalls == 3)
-    println("Android layout, resize mode, header and notice inset checks passed")
+    // Тап, timeout и пересоздание surface используют одну видимость и сохраняют внешний callback.
+    val controls = Check()
+    val events = mutableListOf<Int>()
+    controls.setControllerVisibilityListener { events.add(it) }
+    controls.bindController(controls.playerView)
+    check(controls.header.visibility == View.GONE)
+    controls.playerView.changeVisibility(View.VISIBLE)
+    check(controls.header.visibility == View.VISIBLE && events.last() == View.VISIBLE)
+    controls.playerView.changeVisibility(View.GONE)
+    check(controls.header.visibility == View.VISIBLE && events.last() == View.GONE)
+    check(controls.header.animator.duration == 150L)
+    controls.header.animator.finish()
+    check(controls.header.visibility == View.GONE && controls.header.alpha == 1f)
+    // Быстрый повторный тап отменяет старое скрытие.
+    controls.playerView.changeVisibility(View.VISIBLE)
+    controls.playerView.changeVisibility(View.GONE)
+    controls.playerView.changeVisibility(View.VISIBLE)
+    controls.header.animator.finish()
+    check(controls.header.visibility == View.VISIBLE && controls.header.alpha == 1f)
+    controls.playerView.changeVisibility(View.GONE)
+    controls.header.animator.finish()
+    controls.setPlaybackHeader("Новая серия", "Серия 2", "16+")
+    check(controls.header.visibility == View.GONE)
+    val replacement = PlayerView()
+    replacement.isControllerFullyVisible = true
+    controls.bindController(replacement)
+    check(controls.header.visibility == View.VISIBLE)
+    val eventCount = events.size
+    controls.setControllerVisibilityListener(null)
+    replacement.changeVisibility(View.GONE)
+    controls.header.animator.finish()
+    check(controls.header.visibility == View.GONE && events.size == eventCount)
+    // Пересоздание PlayerView отменяет fade старого заголовка.
+    replacement.changeVisibility(View.VISIBLE)
+    replacement.changeVisibility(View.GONE)
+    val next = PlayerView()
+    next.isControllerFullyVisible = true
+    controls.bindController(next)
+    controls.header.animator.finish()
+    check(controls.header.visibility == View.VISIBLE && controls.header.alpha == 1f)
+    // PiP отменяет fade, игнорирует показ controls и пересоздание surface внутри мини-окна.
+    controls.bindController(controls.playerView)
+    controls.playerView.changeVisibility(View.VISIBLE)
+    controls.playerView.changeVisibility(View.GONE)
+    controls.setIsInPictureInPicture(true)
+    controls.header.animator.finish()
+    check(controls.header.visibility == View.GONE)
+    controls.playerView.changeVisibility(View.VISIBLE)
+    check(controls.header.visibility == View.GONE)
+    controls.bindController(controls.playerView)
+    check(controls.header.visibility == View.GONE)
+    controls.setIsInPictureInPicture(false)
+    check(controls.header.visibility == View.VISIBLE && controls.header.alpha == 1f)
+    controls.setIsInPictureInPicture(true)
+    controls.playerView.changeVisibility(View.GONE)
+    controls.setIsInPictureInPicture(false)
+    check(controls.header.visibility == View.GONE)
+    controls.playerView.changeVisibility(View.VISIBLE)
+    check(controls.header.visibility == View.VISIBLE)
+    // Очистка header возвращает metadata.title и скрывает старые серию/рейтинг.
+    layout.setVideoTitle("Эфир")
+    layout.setPlaybackHeader(" Темные начала. Сезон 3 ", " Серия 6. Бездна ", "16+")
+    check(layout.titleView.text == "Темные начала. Сезон 3")
+    check(layout.episodeTitleView.text == "Серия 6. Бездна")
+    check(layout.episodeTitleView.visibility == View.VISIBLE)
+    check(layout.ageRatingView.text == "16+" && layout.ageRatingView.visibility == View.VISIBLE)
+    layout.setVideoTitle("Новые metadata")
+    check(layout.titleView.text == "Темные начала. Сезон 3")
+    layout.setPlaybackHeader("Фильм", null, "12+")
+    check(layout.episodeTitleView.visibility == View.GONE)
+    layout.setPlaybackHeader(null, null, null)
+    check(layout.titleView.text == "Новые metadata")
+    check(layout.ageRatingView.visibility == View.GONE)
+    layout.setVideoTitle(null)
+    check(layout.titleView.visibility == View.GONE)
+    println("Android header, layout, resize mode and notice inset checks passed")
 }
 '''
 cache = Path.home() / '.gradle/caches/modules-2/files-2.1'
@@ -134,3 +256,35 @@ with tempfile.TemporaryDirectory() as directory:
     subprocess.run(['java', '-cp', classpath, 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-no-stdlib', '-no-reflect',
                     '-classpath', classpath, '-d', directory, str(script)], check=True)
     subprocess.run(['java', '-cp', directory + ':' + classpath, 'CheckKt'], check=True)
+
+# Проверяем настоящий Swift-setter: сериал, фильм и очистка без пересоздания AVPlayer.
+swift = (root / 'ios/Video/RCTVideo.swift').read_text()
+setter = swift[swift.index('    func setPlaybackHeader('):swift.index('    /** Показывает предупреждение без')]
+program = '''import Foundation
+class View { var isHidden = false }
+class Label: View { var text: String?; var superview: View? = View() }
+class Check {
+    let playbackHeaderView: View = { let header = View(); header.isHidden = true; return header }()
+    let playbackTitleView = Label()
+    let playbackSubtitleView = Label()
+    let playbackAgeView = Label()
+''' + setter + '''
+}
+let view = Check()
+view.setPlaybackHeader(["title": " Темные начала. Сезон 3 ", "subtitle": "Серия 6. Бездна", "ageRating": "16+"])
+assert(view.playbackHeaderView.isHidden)
+assert(view.playbackTitleView.text == "Темные начала. Сезон 3")
+assert(view.playbackSubtitleView.text == "Серия 6. Бездна" && !view.playbackSubtitleView.isHidden)
+assert(view.playbackAgeView.text == "16+" && view.playbackAgeView.superview?.isHidden == false)
+view.setPlaybackHeader(["title": "Цвета времени", "ageRating": "12+"])
+assert(view.playbackHeaderView.isHidden && view.playbackSubtitleView.isHidden)
+view.setPlaybackHeader(["title": "Фильм", "subtitle": " ", "ageRating": " "])
+assert(view.playbackSubtitleView.isHidden && view.playbackAgeView.superview?.isHidden == true)
+view.setPlaybackHeader(nil)
+assert(view.playbackHeaderView.isHidden && view.playbackTitleView.text == nil)
+print("Swift playback header update and cleanup checks passed")
+'''
+with tempfile.TemporaryDirectory() as directory:
+    script = Path(directory) / 'Check.swift'
+    script.write_text(program)
+    subprocess.run(['swift', '-module-cache-path', str(Path(directory) / 'cache'), str(script)], check=True)

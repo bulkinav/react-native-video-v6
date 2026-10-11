@@ -377,6 +377,8 @@ export interface VideoNativeProps extends ViewProps {
   rate?: Float;
   /** Предупреждение внутри нативного view. */
   playbackNotice?: string;
+  /** Заголовок, название серии и возрастной лейбл поверх видео. */
+  playbackHeader?: Readonly<{title: string; subtitle?: string; ageRating?: string}>;
   fullscreen?: boolean; // ios, false
   fullscreenAutorotate?: boolean;
   fullscreenOrientation?: WithDefault<string, 'all'>;

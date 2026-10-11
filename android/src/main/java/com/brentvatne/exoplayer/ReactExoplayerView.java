@@ -472,10 +472,6 @@ public class ReactExoplayerView extends FrameLayout implements
             eventEmitter.onControlsVisibilityChange.invoke(isVisible);
         });
 
-        exoPlayerView.setFullscreenButtonClickListener(isFullscreen -> {
-            setFullscreen(!this.isFullscreen);
-        });
-
         updateControllerConfig();
     }
 
@@ -2586,6 +2582,7 @@ public class ReactExoplayerView extends FrameLayout implements
     }
 
     protected void setIsInPictureInPicture(boolean isInPictureInPicture) {
+        exoPlayerView.setIsInPictureInPicture(isInPictureInPicture);
         eventEmitter.onPictureInPictureStatusChanged.invoke(isInPictureInPicture);
 
         if (fullScreenPlayerView != null && fullScreenPlayerView.isShowing()) {
@@ -2775,6 +2772,11 @@ public class ReactExoplayerView extends FrameLayout implements
 
     public void setDisableDisconnectError(boolean disableDisconnectError) {
         this.disableDisconnectError = disableDisconnectError;
+    }
+
+    /** Показывает две строки заголовка и отдельный возрастной лейбл. */
+    public void setPlaybackHeader(String title, String subtitle, String ageRating) {
+        exoPlayerView.setPlaybackHeader(title, subtitle, ageRating);
     }
 
     /** Показывает предупреждение внутри нативного плеера. */

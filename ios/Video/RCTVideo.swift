@@ -61,11 +61,56 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         label.textColor = .white
         label.font = .systemFont(ofSize: 14)
         label.backgroundColor = UIColor.white.withAlphaComponent(0.3)
+        label.layer.cornerRadius = 6
+        label.clipsToBounds = true
         label.alpha = 0.6
         label.textAlignment = .center
         label.numberOfLines = 0
         label.isHidden = true
         return label
+    }()
+    /** Заголовок и название серии задаются приложением, без бизнес-логики внутри AVKit. */
+    private let playbackTitleView = UILabel()
+    private let playbackSubtitleView = UILabel()
+    private let playbackAgeView = UILabel()
+    private lazy var playbackHeaderView: UIStackView = {
+        playbackTitleView.textColor = .white
+        playbackTitleView.font = .systemFont(ofSize: 18)
+        playbackTitleView.lineBreakMode = .byTruncatingTail
+        playbackTitleView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        playbackTitleView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        playbackSubtitleView.textColor = .white
+        playbackSubtitleView.font = .systemFont(ofSize: 14)
+        playbackSubtitleView.lineBreakMode = .byTruncatingTail
+        playbackSubtitleView.isHidden = true
+        playbackAgeView.textColor = .white
+        playbackAgeView.font = .boldSystemFont(ofSize: 14)
+        playbackAgeView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let badge = UIView()
+        badge.backgroundColor = UIColor(red: 26 / 255, green: 97 / 255, blue: 162 / 255, alpha: 1)
+        badge.layer.cornerRadius = 3
+        badge.isHidden = true
+        playbackAgeView.translatesAutoresizingMaskIntoConstraints = false
+        badge.addSubview(playbackAgeView)
+        let badgeConstraints = [
+            playbackAgeView.leadingAnchor.constraint(equalTo: badge.leadingAnchor, constant: 6),
+            playbackAgeView.trailingAnchor.constraint(equalTo: badge.trailingAnchor, constant: -6),
+            playbackAgeView.topAnchor.constraint(equalTo: badge.topAnchor, constant: 2),
+            playbackAgeView.bottomAnchor.constraint(equalTo: badge.bottomAnchor, constant: -2),
+        ]
+        // UIStackView сворачивает скрытый badge до нуля; внутренние отступы не должны мешать.
+        for constraint in badgeConstraints { constraint.priority = .defaultHigh }
+        NSLayoutConstraint.activate(badgeConstraints)
+        let row = UIStackView(arrangedSubviews: [playbackTitleView, badge, UIView()])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        let header = UIStackView(arrangedSubviews: [row, playbackSubtitleView])
+        header.axis = .vertical
+        header.spacing = 2
+        header.isUserInteractionEnabled = false
+        header.isHidden = true
+        return header
     }()
     private var _fullscreen = false
     private var _fullscreenAutorotate = true
@@ -1191,6 +1236,24 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         _chapters = chapters
     }
 
+    /** Обновляет обе строки и возрастной лейбл в сохранённом fullscreen controller. */
+    @objc
+    func setPlaybackHeader(_ header: NSDictionary?) {
+        // let title = (header?["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subtitle = (header?["subtitle"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ageRating = (header?["ageRating"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Показ отключён: AVKit на iOS не сообщает о скрытии controls через публичный API.
+        // playbackHeaderView.isHidden = header == nil
+        // Показ title на iOS отключён.
+        // playbackTitleView.text = title
+        // playbackTitleView.isHidden = title?.isEmpty != false
+        playbackTitleView.isHidden = true
+        playbackSubtitleView.text = subtitle
+        playbackSubtitleView.isHidden = subtitle?.isEmpty != false
+        playbackAgeView.text = ageRating
+        playbackAgeView.superview?.isHidden = ageRating?.isEmpty != false
+    }
+
     /** Показывает предупреждение без перезапуска воспроизведения. */
     @objc
     func setPlaybackNotice(_ notice: String?) {
@@ -1327,6 +1390,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         viewController.view.frame = self.bounds
         viewController.player = player
         playbackNoticeView.removeFromSuperview()
+        playbackHeaderView.removeFromSuperview()
         let overlay = viewController.contentOverlayView ?? viewController.view!
         // Существующий layout растягивает прямые subviews overlay; текст живёт внутри контейнера.
         let noticeContainer = UIView(frame: overlay.bounds)
@@ -1335,7 +1399,12 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         overlay.addSubview(noticeContainer)
         playbackNoticeView.translatesAutoresizingMaskIntoConstraints = false
         noticeContainer.addSubview(playbackNoticeView)
+        playbackHeaderView.translatesAutoresizingMaskIntoConstraints = false
+        noticeContainer.addSubview(playbackHeaderView)
         NSLayoutConstraint.activate([
+            playbackHeaderView.leadingAnchor.constraint(equalTo: noticeContainer.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            playbackHeaderView.trailingAnchor.constraint(equalTo: noticeContainer.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            playbackHeaderView.topAnchor.constraint(equalTo: noticeContainer.safeAreaLayoutGuide.topAnchor, constant: 16),
             playbackNoticeView.leadingAnchor.constraint(equalTo: noticeContainer.safeAreaLayoutGuide.leadingAnchor, constant: 20),
             playbackNoticeView.trailingAnchor.constraint(equalTo: noticeContainer.safeAreaLayoutGuide.trailingAnchor, constant: -20),
             playbackNoticeView.bottomAnchor.constraint(equalTo: noticeContainer.safeAreaLayoutGuide.bottomAnchor, constant: -100),

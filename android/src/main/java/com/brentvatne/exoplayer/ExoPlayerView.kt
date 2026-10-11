@@ -75,7 +75,7 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
         /** Разрешает детектору отслеживать второе нажатие. */
         override fun onDown(event: MotionEvent): Boolean = true
 
-        /** Распознаёт двойной тап только в прежних боковых зонах КИНОТВ. */
+        /** Распознаёт двойной тап только в прежних боковых зонах. */
         override fun onDoubleTap(event: MotionEvent): Boolean {
             if (!doubleTapGestureEnabled || tapOnControls || gestureConsumed) return false
             val density = resources.displayMetrics.density
@@ -144,13 +144,13 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
     private var currentViewType = ViewType.VIEW_TYPE_SURFACE
     private var currentShutterColor = Color.TRANSPARENT
     private var useController = true
+    private var isInPictureInPicture = false
     private var controllerAutoShow = true
     private var controllerHideOnTouch = true
     private var controllerShowTimeoutMs = 5000
     private var showSubtitleButton = false
     private var isPlayerFocusable = true
     private var controllerVisibilityListener: PlayerView.ControllerVisibilityListener? = null
-    private var fullscreenButtonClickListener: PlayerView.FullscreenButtonClickListener? = null
     private val playerViewLayoutChangeListeners = mutableListOf<View.OnLayoutChangeListener>()
     private val liveBadge: TextView = TextView(context).apply {
         text = "LIVE"
@@ -173,12 +173,39 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
         setShadowLayer(2f * resources.displayMetrics.density, 0f, 0f, Color.BLACK)
         visibility = View.GONE
     }
+    /** Вторая строка содержит текущую серию и её название. */
+    private val episodeTitleView = TextView(context).apply {
+        setTextColor(Color.WHITE)
+        textSize = 14f
+        setSingleLine(true)
+        ellipsize = TextUtils.TruncateAt.END
+        setShadowLayer(2f * resources.displayMetrics.density, 0f, 0f, Color.BLACK)
+        visibility = View.GONE
+    }
+    /** Возраст остаётся рядом с названием и не обрезается вместе с длинным title. */
+    private val ageRatingView = TextView(context).apply {
+        setTextColor(Color.WHITE)
+        textSize = 14f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        background = GradientDrawable().apply {
+            setColor(Color.rgb(26, 97, 162))
+            cornerRadius = 3f * resources.displayMetrics.density
+        }
+        val density = resources.displayMetrics.density
+        setPadding((6f * density).roundToInt(), (2f * density).roundToInt(), (6f * density).roundToInt(), (2f * density).roundToInt())
+        visibility = View.GONE
+    }
+    private var videoTitle: String? = null
+    private var playbackTitle: String? = null
     /** Предупреждение остаётся поверх видео при переносе view в fullscreen. */
     private val noticeView = TextView(context).apply {
         setTextColor(Color.WHITE)
         textSize = 14f
         gravity = Gravity.CENTER
-        setBackgroundColor(Color.argb(77, 255, 255, 255))
+        background = GradientDrawable().apply {
+            setColor(Color.argb(77, 255, 255, 255))
+            cornerRadius = 6f * resources.displayMetrics.density
+        }
         alpha = 0.6f
         val padding = (5f * resources.displayMetrics.density).roundToInt()
         setPadding(padding, padding, padding, padding)
@@ -186,11 +213,25 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
     }
     private val header = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        addView(liveBadge, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-            marginEnd = (8f * resources.displayMetrics.density).roundToInt()
-        })
-        addView(titleView, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        gravity = Gravity.TOP
+        val titleRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isBaselineAligned = false
+            addView(liveBadge, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                marginEnd = (8f * resources.displayMetrics.density).roundToInt()
+            })
+            addView(titleView, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, 1f))
+            addView(ageRatingView, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                marginStart = (8f * resources.displayMetrics.density).roundToInt()
+            })
+        }
+        val titles = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(titleRow, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+            addView(episodeTitleView, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        }
+        addView(titles, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
     }
 
     private var playerView = createPlayerView(currentViewType)
@@ -211,8 +252,19 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
 
     /** Показывает metadata.title; пустое название очищает предыдущий материал. */
     fun setVideoTitle(title: String?) {
-        titleView.text = title?.trim()
+        videoTitle = title
+        titleView.text = (playbackTitle ?: videoTitle)?.trim()
         titleView.visibility = if (titleView.text.isNullOrEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** Обновляет заголовок серии без перезагрузки источника и очищает старые лейблы. */
+    fun setPlaybackHeader(title: String?, subtitle: String?, ageRating: String?) {
+        playbackTitle = title
+        setVideoTitle(videoTitle)
+        episodeTitleView.text = subtitle?.trim()
+        episodeTitleView.visibility = if (episodeTitleView.text.isNullOrEmpty()) View.GONE else View.VISIBLE
+        ageRatingView.text = ageRating?.trim()
+        ageRatingView.visibility = if (ageRatingView.text.isNullOrEmpty()) View.GONE else View.VISIBLE
     }
 
     /** Добавляет только ту часть системных отступов, которую ещё не покрыл родитель. */
@@ -362,11 +414,6 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
         playerView.controllerHideOnTouch = hideOnTouch
     }
 
-    fun setFullscreenButtonClickListener(listener: PlayerView.FullscreenButtonClickListener?) {
-        fullscreenButtonClickListener = listener
-        playerView.setFullscreenButtonClickListener(listener)
-    }
-
     fun setShowSubtitleButton(show: Boolean) {
         showSubtitleButton = show
         playerView.setShowSubtitleButton(show)
@@ -376,7 +423,32 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
 
     fun setControllerVisibilityListener(listener: PlayerView.ControllerVisibilityListener?) {
         controllerVisibilityListener = listener
-        playerView.setControllerVisibilityListener(listener)
+    }
+
+    /** Убирает заголовок из PiP и восстанавливает его только при видимых controls. */
+    fun setIsInPictureInPicture(active: Boolean) {
+        isInPictureInPicture = active
+        header.animate().cancel()
+        header.alpha = 1f
+        header.visibility = if (!active && playerView.isControllerFullyVisible) View.VISIBLE else View.GONE
+    }
+
+    /** Плавно скрывает заголовок; повторный показ отменяет незавершённый fade. */
+    private fun updateControllerVisibility(visibility: Int) {
+        header.animate().cancel()
+        if (isInPictureInPicture) {
+            header.alpha = 1f
+            header.visibility = View.GONE
+        } else if (visibility != View.VISIBLE && header.visibility == View.VISIBLE) {
+            header.animate().alpha(0f).setDuration(150L).withEndAction {
+                header.visibility = visibility
+                header.alpha = 1f
+            }
+        } else {
+            header.alpha = 1f
+            header.visibility = visibility
+        }
+        controllerVisibilityListener?.onVisibilityChanged(visibility)
     }
 
     override fun addOnLayoutChangeListener(listener: View.OnLayoutChangeListener) {
@@ -420,8 +492,12 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
         targetPlayerView.player = currentPlayer
         targetPlayerView.isFocusable = isPlayerFocusable
 
-        controllerVisibilityListener?.let(targetPlayerView::setControllerVisibilityListener)
-        fullscreenButtonClickListener?.let(targetPlayerView::setFullscreenButtonClickListener)
+        targetPlayerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+            updateControllerVisibility(visibility)
+        })
+        header.animate().cancel()
+        header.alpha = 1f
+        header.visibility = if (!isInPictureInPicture && targetPlayerView.isControllerFullyVisible) View.VISIBLE else View.GONE
         playerViewLayoutChangeListeners.forEach(targetPlayerView::addOnLayoutChangeListener)
 
         applySecureSurface(targetPlayerView, viewType)

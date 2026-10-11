@@ -103,6 +103,16 @@ class ReactExoplayerViewManager(private val config: ReactExoplayerConfig) : View
         }
     }
 
+    /** Передаёт подготовленные приложением строки заголовка и возрастной рейтинг. */
+    @ReactProp(name = "playbackHeader")
+    fun setPlaybackHeader(videoView: ReactExoplayerView, header: ReadableMap?) {
+        videoView.setPlaybackHeader(
+            ReactBridgeUtils.safeGetString(header, "title"),
+            ReactBridgeUtils.safeGetString(header, "subtitle"),
+            ReactBridgeUtils.safeGetString(header, "ageRating")
+        )
+    }
+
     /** Передаёт предупреждение в view, которое переносится в fullscreen. */
     @ReactProp(name = "playbackNotice")
     fun setPlaybackNotice(videoView: ReactExoplayerView, notice: String?) {
