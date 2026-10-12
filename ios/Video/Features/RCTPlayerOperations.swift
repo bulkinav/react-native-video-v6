@@ -84,11 +84,15 @@ enum RCTPlayerOperations {
         }
     }
 
+    /** Выбирает дорожку по критерию; отсутствие названия оставляет вариант невыбранным. */
+    @MainActor
     static func setMediaSelectionTrackForCharacteristic(player: AVPlayer?, characteristic: AVMediaCharacteristic, criteria: SelectedTrackCriteria?) async {
         let type = criteria?.type
         var mediaOption: AVMediaSelectionOption!
 
-        guard let group = await RCTVideoAssetsUtils.getMediaSelectionGroup(asset: player?.currentItem?.asset, for: characteristic) else {
+        guard let playerItem = player?.currentItem,
+              let group = await RCTVideoAssetsUtils.getMediaSelectionGroup(asset: playerItem.asset, for: characteristic),
+              player?.currentItem === playerItem else {
             return
         }
 
@@ -102,7 +106,7 @@ enum RCTPlayerOperations {
                 if type == "language" {
                     optionValue = currentOption.extendedLanguageTag
                 } else {
-                    optionValue = currentOption.commonMetadata.map(\.value)[0] as? String
+                    optionValue = await RCTVideoAssetsUtils.getMediaSelectionOptionTitle(currentOption)
                 }
                 if value == optionValue {
                     mediaOption = currentOption
@@ -120,12 +124,16 @@ enum RCTPlayerOperations {
                 }
             }
         } else { // default. invalid type or "system"
-            await player?.currentItem?.selectMediaOptionAutomatically(in: group)
+            playerItem.selectMediaOptionAutomatically(in: group)
             return
         }
 
         // If a match isn't found, option will be nil and text tracks will be disabled
-        await player?.currentItem?.select(mediaOption, in: group)
+        // Загрузка названия может завершиться уже после смены источника.
+        guard player?.currentItem === playerItem else {
+            return
+        }
+        playerItem.select(mediaOption, in: group)
     }
 
     /** Перематывает без временной паузы, сохраняя пользовательское состояние воспроизведения. */

@@ -4,6 +4,7 @@ import Photos
 // MARK: - RCTVideoAssetsUtils
 
 enum RCTVideoAssetsUtils {
+    /** Загружает метаданные до синхронного чтения свойств вариантов дорожек. */
     static func getMediaSelectionGroup(
         asset: AVAsset?,
         for mediaCharacteristic: AVMediaCharacteristic
@@ -14,14 +15,36 @@ enum RCTVideoAssetsUtils {
                     return nil
                 }
 
+                // Ошибка необязательных метаданных не блокирует доступ к дорожкам.
+                _ = try? await asset.load(.commonMetadata)
                 return try await asset.loadMediaSelectionGroup(for: mediaCharacteristic)
             } catch {
                 return nil
             }
         } else {
             #if !os(visionOS)
-                return asset?.mediaSelectionGroup(forMediaCharacteristic: mediaCharacteristic)
+                guard let asset else {
+                    return nil
+                }
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    asset.loadValuesAsynchronously(forKeys: ["commonMetadata", "availableMediaCharacteristicsWithMediaSelectionOptions"]) {
+                        continuation.resume()
+                    }
+                }
+                return asset.mediaSelectionGroup(forMediaCharacteristic: mediaCharacteristic)
             #endif
+        }
+    }
+
+    /** Читает название дорожки без индексации пустых метаданных и принудительного приведения типа. */
+    static func getMediaSelectionOptionTitle(_ option: AVMediaSelectionOption?) async -> String? {
+        guard let metadata = option?.commonMetadata.first else {
+            return nil
+        }
+        if #available(iOS 15, tvOS 15, visionOS 1.0, *) {
+            return try? await metadata.load(.stringValue)
+        } else {
+            return metadata.value as? String
         }
     }
 
@@ -133,25 +156,28 @@ enum RCTVideoUtils {
         return 0
     }
 
+    /** Формирует список аудиодорожек текущего элемента плеера на главном actor. */
+    @MainActor
     static func getAudioTrackInfo(_ player: AVPlayer?) async -> [AnyObject] {
-        guard let player, let asset = player.currentItem?.asset else {
+        guard let player, let playerItem = player.currentItem else {
             return []
         }
 
+        let asset = playerItem.asset
         let audioTracks = NSMutableArray()
 
         let group = await RCTVideoAssetsUtils.getMediaSelectionGroup(asset: asset, for: .audible)
 
         for i in 0 ..< (group?.options.count ?? 0) {
             let currentOption = group?.options[i]
-            var title = ""
-            let values = currentOption?.commonMetadata.map(\.value)
-            if (values?.count ?? 0) > 0, let value = values?[0] {
-                title = value as! String
+            let title = await RCTVideoAssetsUtils.getMediaSelectionOptionTitle(currentOption) ?? ""
+            // Не смешиваем метаданные прежнего источника с выбором дорожек нового.
+            guard player.currentItem === playerItem else {
+                return []
             }
             let language: String = currentOption?.extendedLanguageTag ?? ""
 
-            let selectedOption: AVMediaSelectionOption? = player.currentItem?.currentMediaSelection.selectedMediaOption(in: group!)
+            let selectedOption: AVMediaSelectionOption? = playerItem.currentMediaSelection.selectedMediaOption(in: group!)
 
             let audioTrack = [
                 "index": NSNumber(value: i),
@@ -165,24 +191,27 @@ enum RCTVideoUtils {
         return audioTracks as [AnyObject]
     }
 
+    /** Формирует список субтитров текущего элемента плеера на главном actor. */
+    @MainActor
     static func getTextTrackInfo(_ player: AVPlayer?) async -> [TextTrack] {
-        guard let player, let asset = player.currentItem?.asset else {
+        guard let player, let playerItem = player.currentItem else {
             return []
         }
 
+        let asset = playerItem.asset
         // if streaming video, we extract the text tracks
         var textTracks: [TextTrack] = []
         let group = await RCTVideoAssetsUtils.getMediaSelectionGroup(asset: asset, for: .legible)
 
         for i in 0 ..< (group?.options.count ?? 0) {
             let currentOption = group?.options[i]
-            var title = ""
-            let values = currentOption?.commonMetadata.map(\.value)
-            if (values?.count ?? 0) > 0, let value = values?[0] {
-                title = value as! String
+            let title = await RCTVideoAssetsUtils.getMediaSelectionOptionTitle(currentOption) ?? ""
+            // Не смешиваем метаданные прежнего источника с выбором дорожек нового.
+            guard player.currentItem === playerItem else {
+                return []
             }
             let language: String = currentOption?.extendedLanguageTag ?? ""
-            let selectedOption: AVMediaSelectionOption? = player.currentItem?.currentMediaSelection.selectedMediaOption(in: group!)
+            let selectedOption: AVMediaSelectionOption? = playerItem.currentMediaSelection.selectedMediaOption(in: group!)
             let textTrack = TextTrack([
                 "index": NSNumber(value: i),
                 "title": title,
