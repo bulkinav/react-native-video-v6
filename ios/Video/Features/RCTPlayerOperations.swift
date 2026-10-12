@@ -128,8 +128,9 @@ enum RCTPlayerOperations {
         await player?.currentItem?.select(mediaOption, in: group)
     }
 
+    /** Перематывает без временной паузы, сохраняя пользовательское состояние воспроизведения. */
     static func seek(
-        player: AVPlayer, playerItem: AVPlayerItem, paused: Bool, seekTime: Float,
+        player: AVPlayer, playerItem: AVPlayerItem, seekTime: Float,
         seekTolerance: Float, completion: @escaping (Bool) -> Void
     ) {
         let timeScale = 1000
@@ -145,8 +146,6 @@ enum RCTPlayerOperations {
             completion(true)
             return
         }
-
-        if !paused { player.pause() }
 
         player.seek(
             to: cmSeekTime, toleranceBefore: tolerance, toleranceAfter: tolerance,

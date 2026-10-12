@@ -1050,7 +1050,6 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         RCTPlayerOperations.seek(
             player: player,
             playerItem: item,
-            paused: _paused,
             seekTime: time.floatValue,
             seekTolerance: tolerance.floatValue
         ) { [weak self] (_: Bool) in
