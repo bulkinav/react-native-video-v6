@@ -13,6 +13,7 @@ extension DRMManager: AVContentKeySessionDelegate {
     }
 
     func contentKeySession(_: AVContentKeySession, didProvideRenewingContentKeyRequest keyRequest: AVContentKeyRequest) {
+        logFairPlay("key-request renewal")
         handleContentKeyRequest(keyRequest: keyRequest)
     }
 
@@ -22,6 +23,7 @@ extension DRMManager: AVContentKeySessionDelegate {
             .receivedResponseWithExpiredLease,
             .receivedObsoleteContentKey,
         ]
+        logFairPlay("key-request retry reason=\(retryReason.rawValue) allowed=\(retryReasons.contains(retryReason))")
         return retryReasons.contains(retryReason)
     }
 
@@ -36,6 +38,11 @@ extension DRMManager: AVContentKeySessionDelegate {
     }
 
     func contentKeySession(_: AVContentKeySession, contentKeyRequest _: AVContentKeyRequest, didFailWithError error: Error) {
-        DebugLog(String(describing: error))
+        logFairPlayError(error, stage: "avfoundation-rejected")
+    }
+
+    /// Подтверждает в DEBUG-логе, что AVFoundation приняла ответ CKC.
+    func contentKeySession(_: AVContentKeySession, contentKeyRequestDidSucceed _: AVContentKeyRequest) {
+        logFairPlay("avfoundation-accepted")
     }
 }
